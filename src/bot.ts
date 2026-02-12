@@ -10,6 +10,7 @@ const client = new Client({
     GatewayIntentBits.DirectMessages,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildMembers, // Add this to get member info
   ],
   partials: [Partials.Channel]
 });
@@ -49,6 +50,22 @@ function categorizeAttachment(contentType: string | null, name: string) {
 client.on(Events.MessageCreate, async (message: Message) => {
   if (message.author.bot) return; 
   
+  // Get user's server nickname/display name
+  let userDisplayName = message.author.username;
+  let userNickname = null;
+  let userRoles: string[] = [];
+  
+  if (message.guild && message.member) {
+    userDisplayName = message.member.displayName; // This is the nickname or username
+    userNickname = message.member.nickname; // This is specifically the nickname (null if not set)
+    userRoles = message.member.roles.cache.map(role => ({
+      id: role.id,
+      name: role.name,
+      color: role.hexColor,
+      position: role.position,
+    })) as any;
+  }
+  
   // Check if this is a reply to another message
   const isReply = !!message.reference;
   let repliedToMessage = null;
@@ -57,6 +74,15 @@ client.on(Events.MessageCreate, async (message: Message) => {
     try {
       // Fetch the original message being replied to
       const originalMessage = await message.fetchReference();
+      
+      // Get the original author's display name too
+      let originalAuthorDisplayName = originalMessage.author.username;
+      let originalAuthorNickname = null;
+      
+      if (originalMessage.guild && originalMessage.member) {
+        originalAuthorDisplayName = originalMessage.member.displayName;
+        originalAuthorNickname = originalMessage.member.nickname;
+      }
       
       repliedToMessage = {
         messageId: originalMessage.id,
@@ -67,6 +93,8 @@ client.on(Events.MessageCreate, async (message: Message) => {
           id: originalMessage.author.id,
           username: originalMessage.author.username,
           tag: originalMessage.author.tag,
+          displayName: originalAuthorDisplayName,
+          nickname: originalAuthorNickname,
           avatar: originalMessage.author.displayAvatarURL(),
           bot: originalMessage.author.bot,
         },
@@ -77,7 +105,7 @@ client.on(Events.MessageCreate, async (message: Message) => {
         stickerCount: originalMessage.stickers.size,
       };
       
-      console.log(`↩️  Reply detected! Replying to message from ${originalMessage.author.tag}`);
+      console.log(`↩️  Reply detected! Replying to message from ${originalAuthorDisplayName} (@${originalMessage.author.username})`);
     } catch (error) {
       console.error('❌ Error fetching referenced message:', error);
       // Fallback to basic reference info if fetch fails
@@ -178,6 +206,8 @@ client.on(Events.MessageCreate, async (message: Message) => {
           userId: message.author.id,
           username: message.author.username,
           userTag: message.author.tag,
+          userDisplayName: userDisplayName,
+          userNickname: userNickname,
           userAvatar: message.author.displayAvatarURL(),
           message: message.content,
           attachments: attachments,
@@ -202,7 +232,8 @@ client.on(Events.MessageCreate, async (message: Message) => {
       console.error('❌ Error sending reply:', error);
     }
   } else {
-    console.log(`💬 Message in channel by ${message.author.tag}: ${message.content}`);
+    console.log(`💬 Message in channel by ${userDisplayName} (@${message.author.username}): ${message.content}`);
+    if (userNickname) console.log(`   Server nickname: ${userNickname}`);
     if (isReply) console.log(`↩️  This is a reply!`);
     if (attachments.length > 0) {
       console.log(`📎 Attachments (${attachments.length}):`);
@@ -221,6 +252,9 @@ client.on(Events.MessageCreate, async (message: Message) => {
         userId: message.author.id,
         username: message.author.username,
         userTag: message.author.tag,
+        userDisplayName: userDisplayName, // Server nickname or username
+        userNickname: userNickname, // Specifically the nickname (null if not set)
+        userRoles: userRoles, // User's roles in the server
         userAvatar: message.author.displayAvatarURL(),
         message: message.content,
         channelId: message.channel.id,
@@ -243,7 +277,7 @@ client.on(Events.MessageCreate, async (message: Message) => {
           },
           body: JSON.stringify(body)
         });
-        console.log(`✉️ Processed message from ${message.author.tag} in channel`);
+        console.log(`✉️ Processed message from ${userDisplayName} in channel`);
       } catch (error) {
         console.error('❌ Error sending to webhook:', error);
       }
