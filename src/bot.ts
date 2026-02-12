@@ -49,6 +49,47 @@ function categorizeAttachment(contentType: string | null, name: string) {
 client.on(Events.MessageCreate, async (message: Message) => {
   if (message.author.bot) return; 
   
+  // Check if this is a reply to another message
+  const isReply = !!message.reference;
+  let repliedToMessage = null;
+  
+  if (isReply && message.reference) {
+    try {
+      // Fetch the original message being replied to
+      const originalMessage = await message.fetchReference();
+      
+      repliedToMessage = {
+        messageId: originalMessage.id,
+        channelId: originalMessage.channelId,
+        guildId: originalMessage.guildId,
+        content: originalMessage.content,
+        author: {
+          id: originalMessage.author.id,
+          username: originalMessage.author.username,
+          tag: originalMessage.author.tag,
+          avatar: originalMessage.author.displayAvatarURL(),
+          bot: originalMessage.author.bot,
+        },
+        timestamp: originalMessage.createdTimestamp,
+        hasAttachments: originalMessage.attachments.size > 0,
+        attachmentCount: originalMessage.attachments.size,
+        hasStickers: originalMessage.stickers.size > 0,
+        stickerCount: originalMessage.stickers.size,
+      };
+      
+      console.log(`↩️  Reply detected! Replying to message from ${originalMessage.author.tag}`);
+    } catch (error) {
+      console.error('❌ Error fetching referenced message:', error);
+      // Fallback to basic reference info if fetch fails
+      repliedToMessage = {
+        messageId: message.reference.messageId,
+        channelId: message.reference.channelId,
+        guildId: message.reference.guildId,
+        fetchFailed: true,
+      };
+    }
+  }
+  
   // Process all attachments (images, videos, audio, documents, etc.)
   const attachments = message.attachments.map(attachment => {
     const category = categorizeAttachment(attachment.contentType, attachment.name || '');
@@ -62,7 +103,7 @@ client.on(Events.MessageCreate, async (message: Message) => {
       size: attachment.size,
       width: attachment.width,
       height: attachment.height,
-      category: category, // image, video, audio, pdf, document, spreadsheet, presentation, archive, other
+      category: category,
       ephemeral: attachment.ephemeral,
       description: attachment.description,
     };
@@ -78,9 +119,9 @@ client.on(Events.MessageCreate, async (message: Message) => {
     tags: sticker.tags,
   }));
 
-  // Process embeds (for links with previews, rich content)
+  // Process embeds
   const embeds = message.embeds.map(embed => ({
-    type: embed.data.type, // rich, image, video, gifv, article, link
+    type: embed.data.type,
     title: embed.title,
     description: embed.description,
     url: embed.url,
@@ -116,18 +157,9 @@ client.on(Events.MessageCreate, async (message: Message) => {
     })),
   }));
 
-  // Check for referenced message (replies)
-  const referencedMessage = message.reference ? {
-    messageId: message.reference.messageId,
-    channelId: message.reference.channelId,
-    guildId: message.reference.guildId,
-  } : null;
-
-  // Get message type info
-  const messageType = message.type; // DEFAULT, REPLY, THREAD_STARTER_MESSAGE, etc.
-
   if (message.channel.isDMBased()) {
     console.log(`📩 Received DM from ${message.author.tag}: ${message.content}`);
+    if (isReply) console.log(`↩️  This is a reply!`);
     if (attachments.length > 0) {
       console.log(`📎 Attachments (${attachments.length}):`);
       attachments.forEach(att => console.log(`  - ${att.category}: ${att.name} (${(att.size / 1024).toFixed(2)} KB)`));
@@ -139,7 +171,10 @@ client.on(Events.MessageCreate, async (message: Message) => {
       if (N8N_WEBHOOK_URL) {
         const body = {
           type: 'direct_message',
-          messageType: messageType,
+          isReply: isReply,
+          isNewMessage: !isReply,
+          repliedToMessage: repliedToMessage,
+          messageType: message.type,
           userId: message.author.id,
           username: message.author.username,
           userTag: message.author.tag,
@@ -148,7 +183,6 @@ client.on(Events.MessageCreate, async (message: Message) => {
           attachments: attachments,
           stickers: stickers,
           embeds: embeds,
-          referencedMessage: referencedMessage,
           timestamp: message.createdTimestamp,
           editedTimestamp: message.editedTimestamp,
           messageId: message.id,
@@ -169,6 +203,7 @@ client.on(Events.MessageCreate, async (message: Message) => {
     }
   } else {
     console.log(`💬 Message in channel by ${message.author.tag}: ${message.content}`);
+    if (isReply) console.log(`↩️  This is a reply!`);
     if (attachments.length > 0) {
       console.log(`📎 Attachments (${attachments.length}):`);
       attachments.forEach(att => console.log(`  - ${att.category}: ${att.name} (${(att.size / 1024).toFixed(2)} KB)`));
@@ -179,7 +214,10 @@ client.on(Events.MessageCreate, async (message: Message) => {
     if (N8N_WEBHOOK_URL) {
       const body = {
         type: 'channel_message',
-        messageType: messageType,
+        isReply: isReply,
+        isNewMessage: !isReply,
+        repliedToMessage: repliedToMessage,
+        messageType: message.type,
         userId: message.author.id,
         username: message.author.username,
         userTag: message.author.tag,
@@ -192,7 +230,6 @@ client.on(Events.MessageCreate, async (message: Message) => {
         attachments: attachments,
         stickers: stickers,
         embeds: embeds,
-        referencedMessage: referencedMessage,
         timestamp: message.createdTimestamp,
         editedTimestamp: message.editedTimestamp,
         messageId: message.id,
